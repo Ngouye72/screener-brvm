@@ -1,0 +1,38 @@
+name: Mise à jour quotidienne
+
+on:
+  schedule:
+    - cron: "30 22 * * 1-5"   # du lundi au vendredi à 22h30 UTC, après la synchronisation des données
+  workflow_dispatch:           # bouton « Run workflow » pour lancer une mise à jour à la main
+
+permissions:
+  contents: write
+
+jobs:
+  maj:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le screener
+        uses: actions/checkout@v4
+
+      - name: Télécharger les données BRVM
+        run: git clone --depth 1 https://github.com/harzat/brvm-data-public.git /tmp/donnees
+
+      - name: Recalculer les indicateurs
+        run: |
+          avant=$(grep -o '"asOf":"[0-9-]*"' index.html || true)
+          python3 -I scripts/build_brvm.py /tmp/donnees index.html archive/clotures-ajustees.csv
+          apres=$(grep -o '"asOf":"[0-9-]*"' index.html || true)
+          if [ "$avant" = "$apres" ]; then
+            echo "Pas de nouvelle séance ($apres) : aucune publication."
+            git checkout -- index.html archive/clotures-ajustees.csv
+          fi
+
+      - name: Publier
+        run: |
+          git config user.name "screener-brvm-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add index.html archive/clotures-ajustees.csv
+          git diff --cached --quiet && exit 0
+          git commit -m "Séance $(grep -o '"asOf":"[0-9-]*"' index.html | cut -d'"' -f4)"
+          git push
